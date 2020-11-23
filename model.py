@@ -2,7 +2,7 @@
 # when   : 2020.0x.xx
 # who : [sori-machi]
 # what : [zeor kara deep learning]
-# when : 2020.11.16/
+# when : 2020.11.16/2020.11.22
 #---------------------------------------------------------------------------
 # basic-module
 import matplotlib.pyplot as plt
@@ -36,7 +36,16 @@ class Variable:
     funcs = [self.creator]
     while funcs:
       f = funcs.pop()
-      x,y = f.input, f.output
+      # x,y = f.input, f.output
+      gys = [ output.grad for output in f.outputs ]
+      gxs = f.backward(*gys)  # kahen longht input 
+      if not isinstance(gxs, tuple):
+        gxs = (gxs,)
+
+      for x, gx in zip(f.inputs, gxs):
+        x.grad = gx
+        if x.creator is not None:
+          funcs.append(x.creator)
       x.grad = f.backward(y.grad)
       if x.creator is not None:
         funcs.append(x.creator)
@@ -66,7 +75,9 @@ class Function:
 class Add(Function):
   def forward(self,x0,x1):
     y = x0+x1
-    return (y,)
+    return
+  def backward(self, gy):
+    return gy,gy
 
 def add(x0,x1):
   return Add()(x0,x1)
