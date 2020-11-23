@@ -2,7 +2,7 @@
 # when   : 2020.0x.xx
 # who : [sori-machi]
 # what : [zeor kara deep learning]
-# when : 2020.11.16/2020.11.22
+# when : 2020.11.16/2020.11.22/ 2020.11.23
 #---------------------------------------------------------------------------
 # basic-module
 import matplotlib.pyplot as plt
@@ -10,12 +10,18 @@ import sys
 import os
 import pandas as pd
 import numpy as np
+import weakref #2020.11.23
 
 import unittest
 # ----------------
 #---------------------------------------------------------------------------
 # initial
 #
+
+# 2020.11.23 add
+class Config:
+  enable_backprop = True
+
 
 class Variable:
   def __init__(self,data):
@@ -24,31 +30,56 @@ class Variable:
         raise TypeError('{} is not supported..'.format(type(data)))
     self.data = data
     self.grad = None #init
-    self.creator = None #functionの登録を行うためにinstance変数を作成する
+    self.creator = None  #functionの登録を行うためにinstance変数を作成する
+    self.generation = 0
 
   def set_creator(self,func):
     self.creator = func
+    self.generation = func.generation + 1
+  
+  def cleargrad(self):
+    self.grad = None
 
-  def backward(self):
+  def backward(self, retain_grad=False):
     if self.grad is None:
       self.grad = np.ones_like(self.data)
     
-    funcs = [self.creator]
+    #-- 2020.11.23----------------------------
+    funcs = []
+    seen_set = set()
+    def add_func(f):
+      if f not in seen_set:
+        funcs.append(f)
+        seen_set.add(f)
+        funcs.sort(key=lambda x: x.generation)
+    add_func(self.creator)
+    #-----------------------------------------
+
     while funcs:
       f = funcs.pop()
       # x,y = f.input, f.output
-      gys = [ output.grad for output in f.outputs ]
+      # change 2020.11.22------
+      # gys = [ output.grad for output in f.outputs ]
+      gys = [ output().grad for output in f.outputs ]
       gxs = f.backward(*gys)  # kahen longht input 
       if not isinstance(gxs, tuple):
         gxs = (gxs,)
 
       for x, gx in zip(f.inputs, gxs):
-        x.grad = gx
+        if x.grad is None:
+          x.grad = gx
+        else:
+          x.grad = x.grad + gx
         if x.creator is not None:
-          funcs.append(x.creator)
-      x.grad = f.backward(y.grad)
-      if x.creator is not None:
-        funcs.append(x.creator)
+          add_func(x.creator)
+      
+      #2020.11.23
+      if not retain_grad:
+        for y in f.outputs:
+          y().grad = None # y is weakref...
+      # x.grad = f.backward(y.grad)
+      # if x.creator is not None:
+      #   funcs.append(x.creator)
 
 class Function:
   def __call__(self,*inputs):
@@ -59,12 +90,16 @@ class Function:
     if not isinstance(ys,tuple):
       ys = (ys,)
     # y = self.forward(x)
-    outputs = [ Variable(as_array(y)) for y in ys]
-    for output in outputs:
-      output.set_creator(self) #このクラスはfunctioninsタンスなので、funcを持っている
+    outputs = [Variable(as_array(y)) for y in ys]
+
+    if Config.enable_backprop:
+      self.generation = max([x.generation for x in inputs])  #関数に(世代)の記憶を持たせる
+      for output in outputs:
+        output.set_creator(self) #このクラスはfunctioninsタンスなので、funcを持っている
     
     self.inputs = inputs
-    self.outputs = outputs
+    # self.outputs = outputs #memory before
+    self.outputs = [ weakref.ref(output) for output in outputs] #memory before
     return outputs if len(outputs) >1 else outputs[0]
 
   def forward(self,x):
@@ -75,7 +110,7 @@ class Function:
 class Add(Function):
   def forward(self,x0,x1):
     y = x0+x1
-    return
+    return y
   def backward(self, gy):
     return gy,gy
 
@@ -83,11 +118,16 @@ def add(x0,x1):
   return Add()(x0,x1)
 
 class Square(Function):
-  def forward(self,x):
-    return x**2
+  def forward(self, x):
+    y = x**2
+    return y
   def backward(self,gy):
-    x = self.input.data
-    return gy * 2*x 
+    # x = self.input.data :before change 
+    x = self.inputs[0].data  #:before change
+    # print(gy)
+    # sys.exit()
+    gx = 2 * x * gy
+    return gx
 
 class Exp(Function):
   def forward(self,x):
@@ -145,24 +185,22 @@ if __name__ =="__main__":
   # test code assert------------
   # unittest.main()
   # sys.exit()
-
-  # x = Variable(np.array(0.5))
-  # x = Variable(None)
-  x0 = Variable(np.array(2))
-  x1 = Variable(np.array(3))
-  y = add(x0,x1)
-  print(y.data)
-  sys.exit()
-
-  sys.exit()
-  a = square(x)
-  b = exp(a)
-  y = square(b)
-
-  #逆伝播
+  #-----------------------------
+  # sample test------------
+  x0 = Variable(np.array(1.0))
+  x1 = Variable(np.array(1.0))
+  t = add(x0, x1)
+  y = add(x0, t)
   y.backward()
+  print(y.grad, t.grad)
+  print(x0.grad, x1.grad)
+  sys.exit()
+  x = Variable(np.array(2.0))
+  a = square(x)
+  y = add(square(a), square(a))
+  y.backward()
+  print(y.data)
   print(x.grad)
-
   # assert y.creator == C
   # assert y.creator.input ==b
   # assert y.creator.input.creator ==B
