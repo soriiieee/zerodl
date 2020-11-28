@@ -2,7 +2,7 @@
 # when   : 2020.0x.xx
 # who : [sori-machi]
 # what : [zeor kara deep learning]
-# when : 2020.11.16/22/23/28
+# when : 2020.11.16/2020.11.22/ 2020.11.23
 #---------------------------------------------------------------------------
 # basic-module
 import matplotlib.pyplot as plt
@@ -13,8 +13,6 @@ import numpy as np
 import weakref #2020.11.23
 
 import unittest
-
-import contextlib
 # ----------------
 #---------------------------------------------------------------------------
 # initial
@@ -26,39 +24,14 @@ class Config:
 
 
 class Variable:
-  def __init__(self,data,name=None):
+  def __init__(self,data):
     if data is not None:
       if not isinstance(data,np.ndarray):
         raise TypeError('{} is not supported..'.format(type(data)))
     self.data = data
-    self.grad = None  #init
-    self.name = name
+    self.grad = None #init
     self.creator = None  #functionの登録を行うためにinstance変数を作成する
     self.generation = 0
-  
-  def __len__(self): #通常用いるlenのカスタマイズ機能を実装する仕組み(特殊メソッド)
-    return len(self.data)
-
-  def __mul__(self, other):
-    return mul(self,other)
-
-  def __repr__(self): #python のprint関数のカスタマイズ
-    if self.data is None:
-      return 'Variable(None)'
-    p = str(self.data).replace("\n", "\n" + " " * 9)
-    return 'Variable(' + p + ')'
-    
-  
-  # 2020.11.28 add - in 
-  @property #x.shape() ではなく、x.shape で取り出せる
-  def shape(self):
-    return self.data.shape
-  def ndim(self):
-    return self.data.ndim
-  def size(self):
-    return self.data.size
-  def dtype(self):
-    return self.data.dtype
 
   def set_creator(self,func):
     self.creator = func
@@ -141,6 +114,9 @@ class Add(Function):
   def backward(self, gy):
     return gy,gy
 
+def add(x0,x1):
+  return Add()(x0,x1)
+
 class Square(Function):
   def forward(self, x):
     y = x**2
@@ -152,30 +128,21 @@ class Square(Function):
     # sys.exit()
     gx = 2 * x * gy
     return gx
+
 class Exp(Function):
   def forward(self,x):
     return np.exp(x)
   def backward(self,gy):
     x = self.input.data
-    return gy * np.exp(x)
+    return gy* np.exp(x)
 
-class Mul(Function):
-  def forward(self, x0, x1):
-    y = x0 * x1
-    return y 
-  def backward(self, gy):
-    x0, x1 = self.inputs[0].data, self.inputs[1].data
-    return gy * x0, gy * x1
-    
-
-def add(x0,x1):
-  return Add()(x0,x1)
 def square(x):
-  return Square()(x)
+  f = Square()
+  return f(x)
+
 def exp(x):
-  return Exp()(x)
-def mul(x0, x1):
-  return Mul()(x0,x1)
+  f = Exp()
+  return f(x)
 
 def numerical_diff(f,x,eps=1e-4):
   x0 = Variable(x.data - eps)
@@ -212,20 +179,6 @@ class SquareTest(unittest.TestCase):
     self.assertEqual(flg)
 
 
-@contextlib.contextmanager
-def using_config(name, value):
-  old_value = getattr(Config, name)
-  setattr(Config, name, value)
-  try:
-    #write pre - processig
-    yield
-    #write after- processig
-  finally:
-    setattr(Config, name, old_value)
-
-def no_grad():
-  return using_config("enable_backprop", False)
-
 
 if __name__ =="__main__":
   #-----------------------------
@@ -234,22 +187,6 @@ if __name__ =="__main__":
   # sys.exit()
   #-----------------------------
   # sample test------------
-
-  # with no_grad():
-  a = Variable(np.array(3.0))
-  b = Variable(np.array(2.0))
-  c = Variable(np.array(1.0))
-
-  y = add(mul(a, b), c)
-  y.backward()
-
-  print(y)
-  print(a.grad)
-  print(b.grad)
-  sys.exit()
-    # x = Variable(2.0)
-    # y = square(x)
-    # p
   x0 = Variable(np.array(1.0))
   x1 = Variable(np.array(1.0))
   t = add(x0, x1)
