@@ -3,28 +3,44 @@
 # who : [sori-machi]
 # what : [zeor kara deep learning]
 # when : 2020.11.16/22/23/28
-#---------------------------------------------------------------------------
-# basic-module
-import matplotlib.pyplot as plt
+#------------------------------------------------------------------------
+# import matplotlib.pyplot as plt
 import sys
-import os
-import pandas as pd
+
 import numpy as np
 import weakref #2020.11.23
-
 import unittest
-
 import contextlib
+import dezero #2020.12.01
 # ----------------
 #---------------------------------------------------------------------------
 # initial
 #
 
-# 2020.11.23 add
+# 2020.11.23 add ---------------------
+# config
+#-------------------------------------
 class Config:
   enable_backprop = True
 
+@contextlib.contextmanager
+def using_config(name, value):
+  old_value = getattr(Config, name)
+  setattr(Config, name, value)
+  try:
+    #write pre - processig
+    yield
+    #write after- processig
+  finally:
+    setattr(Config, name, old_value)
 
+def no_grad():
+  return using_config("enable_backprop", False)
+
+
+# 2020.11.16 add ---------------------
+# Variable / Function
+#-------------------------------------
 class Variable:
   __array_priority__ = 200 #arrayの優先度をあげるようにする
   
@@ -55,12 +71,18 @@ class Variable:
   @property #x.shape() ではなく、x.shape で取り出せる
   def shape(self):
     return self.data.shape
+  @property
   def ndim(self):
     return self.data.ndim
+  @property
   def size(self):
     return self.data.size
+  @property
   def dtype(self):
     return self.data.dtype
+  @property
+  def T(self):
+    return dezero.functions.transpose(self)
 
   def set_creator(self,func):
     self.creator = func
@@ -68,10 +90,20 @@ class Variable:
   
   def cleargrad(self):
     self.grad = None
+  
+  #2020.12.01
+  def reshape(self, *shape):
+    if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+      shape = shape[0]
+    return dezero.functions.reshape(self, shape)
+  
+  def transpose(self):
+    return dezero.functions.transpose(self)
 
-  def backward(self, retain_grad=False):
+  def backward(self, retain_grad=False, create_graph=False):
     if self.grad is None:
-      self.grad = np.ones_like(self.data)
+      # self.grad = np.ones_like(self.data) #simple_code.py
+      self.grad = Variable(np.ones_like(self.data)) #simple_code.py 2020.11.29
     
     #-- 2020.11.23----------------------------
     funcs = []
@@ -88,19 +120,20 @@ class Variable:
       f = funcs.pop()
       # x,y = f.input, f.output
       # change 2020.11.22------
-      # gys = [ output.grad for output in f.outputs ]
-      gys = [ output().grad for output in f.outputs ]
-      gxs = f.backward(*gys)  # kahen longht input 
-      if not isinstance(gxs, tuple):
-        gxs = (gxs,)
+      gys = [output().grad for output in f.outputs]
+      with using_config("enable_backprop", create_graph):
 
-      for x, gx in zip(f.inputs, gxs):
-        if x.grad is None:
-          x.grad = gx
-        else:
-          x.grad = x.grad + gx
-        if x.creator is not None:
-          add_func(x.creator)
+        gxs = f.backward(*gys)  # kahen longht input 
+        if not isinstance(gxs, tuple):
+          gxs = (gxs,)
+
+        for x, gx in zip(f.inputs, gxs):
+          if x.grad is None:
+            x.grad = gx
+          else:
+            x.grad = x.grad + gx
+          if x.creator is not None:
+            add_func(x.creator)
       
       #2020.11.23
       if not retain_grad:
@@ -128,9 +161,9 @@ class Function:
       for output in outputs:
         output.set_creator(self) #このクラスはfunctioninsタンスなので、funcを持っている
     
-    self.inputs = inputs
+      self.inputs = inputs
     # self.outputs = outputs #memory before
-    self.outputs = [ weakref.ref(output) for output in outputs] #memory before
+      self.outputs = [ weakref.ref(output) for output in outputs] #memory before
     return outputs if len(outputs) >1 else outputs[0]
 
   def forward(self,x):
@@ -139,11 +172,16 @@ class Function:
     raise NotImplemntError()
 
 class Add(Function):
-  def forward(self,x0,x1):
+  def forward(self, x0, x1):
+    self.x0_shape,self.x1_shape = x0.shape, x1.shape #2020.12.02
     y = x0+x1
     return y
   def backward(self, gy):
-    return gy,gy
+    gy0,gy1 = gy,gy
+    if self.x0_shape != self.x1_shape:
+      gx0 = dezero.functions.sum_to(gy0,self.x0_shape)
+      gx1 = dezero.functions.sum_to(gy1,self.x1_shape)
+    return gy0,gy1
 
 class Square(Function):
   def forward(self, x):
@@ -156,6 +194,7 @@ class Square(Function):
     # sys.exit()
     gx = 2 * x * gy
     return gx
+
 class Exp(Function):
   def forward(self,x):
     return np.exp(x)
@@ -168,8 +207,13 @@ class Mul(Function):
     y = x0 * x1
     return y 
   def backward(self, gy):
-    x0, x1 = self.inputs[0].data, self.inputs[1].data
-    return gy * x0, gy * x1
+      x0, x1 = self.inputs
+      gx0 = gy * x1
+      gx1 = gy * x0
+      if x0.shape != x1.shape:  # for broadcast
+          gx0 = dezero.functions.sum_to(gx0, x0.shape)
+          gx1 = dezero.functions.sum_to(gx1, x1.shape)
+      return gx0, gx1
 
 class Neg(Function):
   def forward(self, x):
@@ -179,21 +223,38 @@ class Neg(Function):
 
 class Sub(Function):
   def forward(self, x0, x1):
+    self.x0_shape, self.x1_shape = x0.shape, x1.shape
     y = x0 - x1
     return y
+
   def backward(self, gy):
-    return gy, -gy
+      gx0 = gy
+      gx1 = -gy
+      if self.x0_shape != self.x1_shape:  # for broadcast
+          gx0 = dezero.functions.sum_to(gx0, self.x0_shape)
+          gx1 = dezero.functions.sum_to(gx1, self.x1_shape)
+      return gx0, gx1
 
 class Div(Function):
   def forward(self, x0, x1):
     y = x0 / x1
     return y
   def backward(self, gy):
-    x0, x1 = self.inputs[0].data, self.inputs[1].data
+    # x0, x1 = self.inputs[0].data, self.inputs[1].data
+    x0,x1 = self.inputs
     gx0 = gy / x1
     gx1 = gy * (-x0 / x1 ** 2)
     return gx0, gx1
 
+  def backward(self, gy):
+      x0, x1 = self.inputs
+      gx0 = gy / x1
+      gx1 = gy * (-x0 / x1 ** 2)
+      if x0.shape != x1.shape:  # for broadcast
+          gx0 = dezero.functions.sum_to(gx0, x0.shape)
+          gx1 = dezero.functions.sum_to(gx1, x1.shape)
+      return gx0, gx1
+      
 class Pow(Function):
   def __init__(self,c):
     self.c = c
@@ -201,8 +262,11 @@ class Pow(Function):
     y = x ** self.c
     return y
   def backward(self, gy):
-    x = self.inputs[0].data
+    # x = self.inputs
+    x, = self.inputs
     c = self.c
+
+    # print(x,c)
     gx = c * x ** (c - 1) * gy
     return gx
   
@@ -279,62 +343,14 @@ class SquareTest(unittest.TestCase):
     flg = np.allclose(x.grad, num_grad)
     self.assertEqual(flg)
 
-
-@contextlib.contextmanager
-def using_config(name, value):
-  old_value = getattr(Config, name)
-  setattr(Config, name, value)
-  try:
-    #write pre - processig
-    yield
-    #write after- processig
-  finally:
-    setattr(Config, name, old_value)
-
-def no_grad():
-  return using_config("enable_backprop", False)
-
-
-if __name__ =="__main__":
-  #-----------------------------
-  # test code assert------------
-  # unittest.main()
-  # sys.exit()
-  #-----------------------------
-  # sample test------------
-
-  # with no_grad():
-  a = Variable(np.array(3.0))
-  b = Variable(np.array(2.0))
-  c = Variable(np.array(1.0))
-
-  y = add(mul(a, b), c)
-  y.backward()
-
-  print(y)
-  print(a.grad)
-  print(b.grad)
-  sys.exit()
-    # x = Variable(2.0)
-    # y = square(x)
-    # p
-  x0 = Variable(np.array(1.0))
-  x1 = Variable(np.array(1.0))
-  t = add(x0, x1)
-  y = add(x0, t)
-  y.backward()
-  print(y.grad, t.grad)
-  print(x0.grad, x1.grad)
-  sys.exit()
-  x = Variable(np.array(2.0))
-  a = square(x)
-  y = add(square(a), square(a))
-  y.backward()
-  print(y.data)
-  print(x.grad)
-  # assert y.creator == C
-  # assert y.creator.input ==b
-  # assert y.creator.input.creator ==B
-  # assert y.creator.input.creator.input ==a
-  # print(x.grad)
-  sys.exit()
+def setup_variable():
+  Variable.__mul__ = mul
+  Variable.__add__ = add
+  Variable.__rmul__ = mul
+  Variable.__radd__ = add
+  Variable.__neg__ = neg
+  Variable.__sub__ = sub
+  Variable.__rsub__ = rsub
+  Variable.__truediv__ = div
+  Variable.__rtruediv__ = rdiv
+  Variable.__pow__ = pow

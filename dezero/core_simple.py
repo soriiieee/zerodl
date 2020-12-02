@@ -3,17 +3,13 @@
 # who : [sori-machi]
 # what : [zeor kara deep learning]
 # when : 2020.11.16/22/23/28
-#---------------------------------------------------------------------------
-# basic-module
-import matplotlib.pyplot as plt
+#------------------------------------------------------------------------
+# import matplotlib.pyplot as plt
 import sys
-import os
-import pandas as pd
+
 import numpy as np
 import weakref #2020.11.23
-
 import unittest
-
 import contextlib
 # ----------------
 #---------------------------------------------------------------------------
@@ -55,10 +51,13 @@ class Variable:
   @property #x.shape() ではなく、x.shape で取り出せる
   def shape(self):
     return self.data.shape
+  @property
   def ndim(self):
     return self.data.ndim
+  @property
   def size(self):
     return self.data.size
+  @property
   def dtype(self):
     return self.data.dtype
 
@@ -156,6 +155,7 @@ class Square(Function):
     # sys.exit()
     gx = 2 * x * gy
     return gx
+
 class Exp(Function):
   def forward(self,x):
     return np.exp(x)
@@ -169,7 +169,8 @@ class Mul(Function):
     return y 
   def backward(self, gy):
     x0, x1 = self.inputs[0].data, self.inputs[1].data
-    return gy * x0, gy * x1
+    return gy * x1, gy * x0 #2020.11.26 反対のinputをかけて出力する(定数とみなすので!)
+
 
 class Neg(Function):
   def forward(self, x):
@@ -294,47 +295,14 @@ def using_config(name, value):
 def no_grad():
   return using_config("enable_backprop", False)
 
-
-if __name__ =="__main__":
-  #-----------------------------
-  # test code assert------------
-  # unittest.main()
-  # sys.exit()
-  #-----------------------------
-  # sample test------------
-
-  # with no_grad():
-  a = Variable(np.array(3.0))
-  b = Variable(np.array(2.0))
-  c = Variable(np.array(1.0))
-
-  y = add(mul(a, b), c)
-  y.backward()
-
-  print(y)
-  print(a.grad)
-  print(b.grad)
-  sys.exit()
-    # x = Variable(2.0)
-    # y = square(x)
-    # p
-  x0 = Variable(np.array(1.0))
-  x1 = Variable(np.array(1.0))
-  t = add(x0, x1)
-  y = add(x0, t)
-  y.backward()
-  print(y.grad, t.grad)
-  print(x0.grad, x1.grad)
-  sys.exit()
-  x = Variable(np.array(2.0))
-  a = square(x)
-  y = add(square(a), square(a))
-  y.backward()
-  print(y.data)
-  print(x.grad)
-  # assert y.creator == C
-  # assert y.creator.input ==b
-  # assert y.creator.input.creator ==B
-  # assert y.creator.input.creator.input ==a
-  # print(x.grad)
-  sys.exit()
+def setup_variable():
+  Variable.__mul__ = mul
+  Variable.__add__ = add
+  Variable.__rmul__ = mul
+  Variable.__radd__ = add
+  Variable.__neg__ = neg
+  Variable.__sub__ = sub
+  Variable.__rsub__ = rsub
+  Variable.__truediv__ = div
+  Variable.__rtruediv__ = rdiv
+  Variable.__pow__ = pow
