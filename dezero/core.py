@@ -96,6 +96,9 @@ class Variable:
     if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
       shape = shape[0]
     return dezero.functions.reshape(self, shape)
+
+  def sum(self, axis=None, keepdims=False):
+    return dezero.functions.sum(self,axis,keepdims)
   
   def transpose(self):
     return dezero.functions.transpose(self)
@@ -122,7 +125,6 @@ class Variable:
       # change 2020.11.22------
       gys = [output().grad for output in f.outputs]
       with using_config("enable_backprop", create_graph):
-
         gxs = f.backward(*gys)  # kahen longht input 
         if not isinstance(gxs, tuple):
           gxs = (gxs,)
@@ -176,12 +178,13 @@ class Add(Function):
     self.x0_shape,self.x1_shape = x0.shape, x1.shape #2020.12.02
     y = x0+x1
     return y
+
   def backward(self, gy):
-    gy0,gy1 = gy,gy
+    gx0,gx1 = gy,gy
     if self.x0_shape != self.x1_shape:
-      gx0 = dezero.functions.sum_to(gy0,self.x0_shape)
-      gx1 = dezero.functions.sum_to(gy1,self.x1_shape)
-    return gy0,gy1
+      gx0 = dezero.functions.sum_to(gx0,self.x0_shape)
+      gx1 = dezero.functions.sum_to(gx1,self.x1_shape)
+    return gx0,gx1
 
 class Square(Function):
   def forward(self, x):
@@ -194,13 +197,6 @@ class Square(Function):
     # sys.exit()
     gx = 2 * x * gy
     return gx
-
-class Exp(Function):
-  def forward(self,x):
-    return np.exp(x)
-  def backward(self,gy):
-    x = self.input.data
-    return gy * np.exp(x)
 
 class Mul(Function):
   def forward(self, x0, x1):
@@ -239,12 +235,6 @@ class Div(Function):
   def forward(self, x0, x1):
     y = x0 / x1
     return y
-  def backward(self, gy):
-    # x0, x1 = self.inputs[0].data, self.inputs[1].data
-    x0,x1 = self.inputs
-    gx0 = gy / x1
-    gx1 = gy * (-x0 / x1 ** 2)
-    return gx0, gx1
 
   def backward(self, gy):
       x0, x1 = self.inputs
@@ -254,7 +244,7 @@ class Div(Function):
           gx0 = dezero.functions.sum_to(gx0, x0.shape)
           gx1 = dezero.functions.sum_to(gx1, x1.shape)
       return gx0, gx1
-      
+
 class Pow(Function):
   def __init__(self,c):
     self.c = c
@@ -270,15 +260,11 @@ class Pow(Function):
     gx = c * x ** (c - 1) * gy
     return gx
   
-    
-
 def add(x0, x1):
   x1 = as_array(x1)
   return Add()(x0,x1)
 def square(x):
   return Square()(x)
-def exp(x):
-  return Exp()(x)
 def mul(x0, x1):
   x1 = as_array(x1)
   return Mul()(x0, x1)
@@ -354,3 +340,7 @@ def setup_variable():
   Variable.__truediv__ = div
   Variable.__rtruediv__ = rdiv
   Variable.__pow__ = pow
+
+
+class Parameter(Variable):
+  pass

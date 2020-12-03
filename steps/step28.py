@@ -4,15 +4,17 @@
 # what : [zeor kara deep learning]
 # when : 2020.11.16/2020.11.29
 
+if '__file__' in globals():
+    import os, sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import numpy as np
-import sys, os
-import math
-sys.path.append("/Users/soriiieee/work/zerodl")
-# print(sys.path)
-# sys.exit()
-# from dezero.core_simple import Function
-from dezero.core_simple import Variable
-from dezero.utils import plot_dot_graph
+from dezero import Variable
+# import dezero's simple_core explicitly
+import dezero
+if not dezero.is_simple_core:
+    from dezero.core_simple import Variable
+    from dezero.core_simple import setup_variable
+    setup_variable()
 #(output, verbose=True, to_file="png/sample.png")
 
 
@@ -24,7 +26,7 @@ x0 = Variable(np.array(0.0))
 x1 = Variable(np.array(2.0))
 
 lr = 0.001
-iters = 10000
+iters = 50000
 
 for i in range(iters):
   print(x0, x1)
@@ -42,4 +44,4 @@ for i in range(iters):
 y = rosenbrock(x0, x1)
 y.backward()
 
-print(x0.grad, x1.grad)
+# print(x0.grad, x1.grad)

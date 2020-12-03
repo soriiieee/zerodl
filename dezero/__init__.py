@@ -10,6 +10,9 @@ if is_simple_core:
   from dezero.core_simple import setup_variable
 else:
   from dezero.core import Variable
+  from dezero.core import Parameter #add 2020.12.03 
+  from dezero.layers import Layer  #add 2020.12.03
+  from dezero.models import Model
   from dezero.core import Function
   from dezero.core import using_config
   from dezero.core import Variable
